@@ -10,16 +10,25 @@ import spacy
 from spacy.matcher import Matcher
 
 # Utilities Imports
+from datetime import datetime
 import os
 import pandas as pd
+import re
 
 
 
 #### Text Loading Function Library ####
 
 def pdf_pdfplumber_textract(filepath_string):
+    '''
+    This function takes a file path of a pdf and returns text represtation
+    using the pdfplumber package.
+
+    parameters: string of the filepath
+    return: string of text
+    '''
     with pdfplumber.open(filepath_string) as pdf:
-        resume_pages_text = [pdf.pages[i].extract_text() for i in range(len(pdf.pages))]
+        resume_pages_text = [pdf.pages[i].extract_text() for i in range(len(pdf.pages))]  #list of pages of text for each pdf page
         resume_text = '\n'.join(resume_pages_text)
         return resume_text
 
@@ -133,7 +142,7 @@ def extract_email(resume_text):
         return span.text
 
 
-def find_section_header(section_dictionary, resume_text, verbose=False):
+def find_section_headers(section_dictionary, resume_text, verbose=False):
     if verbose: print(f'SYSTEM: Loading section patterns for {list(section_dictionary.keys())[0]}')
     section_patterns = list(section_dictionary.values())[0]
     
@@ -157,12 +166,27 @@ def find_section_header(section_dictionary, resume_text, verbose=False):
         return span.text
 
 
+def find_token_pattern_matches(pattern_list, text):
+    nlp_text = nlp(text)
+    matcher = Matcher(nlp.vocab)
+    matcher.add('Title', None, *pattern_list)
+    matches = matcher(nlp_text)
+    results = []
+    for match_id, start, end in matches:
+        span = nlp_text[start:end]
+        results.append(span.text)
+    return results
+
+
 def extract_resume_sections(resume_text):
     # Define Resume Section Paterns
     professional_summary = {'professional_summary': [
         ## Pattern 1
+        [{'LOWER': 'work', 'OP': '*'},
+        {'LOWER': 'summary', 'OP': '+'},
+        {'IS_PUNCT': True, 'OP': '*'}],
+        ## Pattern 2
         [{'LOWER': 'professional', 'OP': '*'},
-        {'LOWER': 'work', 'OP': '*'},
         {'LOWER': 'summary', 'OP': '+'},
         {'IS_PUNCT': True, 'OP': '*'}],
         ]}
@@ -193,7 +217,7 @@ def extract_resume_sections(resume_text):
     
 
     # Seperate resume into key sections
-    section_tuples_list = [(list(section_pattern.keys())[0], find_section_header(section_pattern, resume_text)) for section_pattern in resume_section_patterns]
+    section_tuples_list = [(list(section_pattern.keys())[0], find_section_headers(section_pattern, resume_text)) for section_pattern in resume_section_patterns]
     section_seperator='***************************'
     new_text = resume_text
     for name, string in section_tuples_list:
@@ -219,7 +243,24 @@ def extract_resume_sections(resume_text):
 
     return resume_sections
 
+def extract_years_of_experience(work_experience_string):
+    # build a list of all of the matches
 
+    nineties_pattern = [
+        {"TEXT":{"REGEX": "^19\d\d$"}},
+        {"ORTH": '-'},
+        ]
+
+    two_thousands_pattern = [
+        {"TEXT":{"REGEX": "^20\d\d$"}},
+        {"ORTH": '-'},
+         ]
+    year_token_pattens = [nineties_pattern, two_thousands_pattern]
+    
+    first_year = min([int(match[:4]) for match in find_token_pattern_matches(year_token_pattens, work_experience_string)])
+    this_year = int(datetime.today().strftime('%Y'))
+    years_of_work_experience = this_year - first_year
+    return years_of_work_experience
 
 ### Master Parse Function ###
 
@@ -230,9 +271,11 @@ def parse_resume(filepath_string, verbose=False):
     if verbose: print(f'System: Building resume object')
     key_resume_sections = extract_resume_sections(resume_text)
     resume_dictionary = {
+        'resume_file': filepath_string.split('/')[-1],
         'name': extract_name(resume_text),
         'phone_number': extract_phone_number(resume_text),
         'email': extract_email(resume_text),
+        'work_experience_years': extract_years_of_experience(key_resume_sections['work_experience'])
     }
     resume_dictionary.update(key_resume_sections)
     resume_dictionary['text'] = resume_text
@@ -240,9 +283,13 @@ def parse_resume(filepath_string, verbose=False):
     
     return resume_dictionary
 
-####  Application Code ####
-        
-filepath_string = '/Users/jayfinch/Polydelta_Drive/3. Zimagi/Zimagi_Resume_Bot/Positions/SeniorSecurityEngineer/Resumes/The Maven Group Candidate-Eric Davidson 003.docx'
+if __name__ == "__main__":            
+    filepath_string = '/Users/jayfinch/Polydelta_Drive/3. Zimagi/Zimagi_Resume_Bot/Positions/SeniorSecurityEngineer/Resumes/The Maven Group Candidate-Eric Davidson 003.docx'
 
-for key, value in parse_resume(filepath_string).items():
-    print(f'\n{key}:\n{value}\n\n\n{"#"*200}')
+    for key, value in parse_resume(filepath_string).items():
+        print(f'\n{key}:\n{value}\n\n\n{"#"*200}')
+
+    # print(parse_resume(filepath_string)['work_experience_years'])
+    # print('#'*200)
+    # print(parse_resume(filepath_string)['work_experience'])
+
